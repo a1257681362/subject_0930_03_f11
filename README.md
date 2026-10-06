@@ -610,3 +610,93 @@ mvn test
 CONDITIONAL 必带合法等级、无借阅/已批准待出库 RECALL/已归还 SUPPLEMENT_CONFIRM/
 审批中驳回四种补偿对应、两补偿互持 id、RECALL 阻断出库且先闭环、
 等级补偿不得先于借阅补偿闭环、确认时最终等级再更正；全动作台账留痕。
+
+## 文物鉴定意见与修复操作并发（museum-11）
+
+文物**鉴定一案串联初鉴与复鉴**，两轮意见**分别固化专家、依据、置信说明与附件**，
+任何一轮都不覆盖另一轮；两轮已发布结论**冲突时进入仲裁**，绝不用最后一条意见覆盖前文。
+意见**未发布可由专家本人撤回**（留痕不删档），**已发布只能追加更正、原文永不改写**。
+**普通馆员只能看到结论摘要**，**下载详细报告逐条记录审计流水**（放行/拒绝都留痕）。
+博物馆修复的**同一操作并发发起**时，项目行锁串行化，**谁生效、谁被拒绝逐条落审计**。
+
+### 鉴定意见规则
+
+- **案件头**（`t_appraisal_case`，单号 `AP-000001`）：`OPEN 待初鉴 → REVIEWING 待复鉴
+  → CONCLUDED 已定稿`；结论冲突时旁路进入 `ARBITRATING 仲裁中`，仲裁定稿后才
+  `CONCLUDED`。案件头快照最终结论落在第几环（`INITIAL/REVIEW/ARBITRATION`）、
+  最终意见 id、定稿人与对外结论摘要。
+- **两轮意见分别成行**（`t_appraisal_opinion`，`uk(case_id, stage, round_no)`）：
+  初鉴 `INITIAL`、复鉴 `REVIEW`，各自独立保存专家姓名/职称、**鉴定依据**、
+  **置信说明**（把握程度、不确定性、边界条件）、结论码（真 `AUTHENTIC` / 伪
+  `COUNTERFEIT` / 部分真 `PARTIAL` / 暂不定论 `INCONCLUSIVE`）、结论文本；
+  附件统一登记 `t_appraisal_attachment`（意见/更正/仲裁三选一归属，CHECK 约束保证
+  仅一处非空）。
+- **未发布草稿可撤回**：意见先存 `DRAFT`，只能由**专家本人**撤回，置 `WITHDRAWN`
+  并填撤回原因——**留痕不删行、不删附件**；撤回后重提即该轮次下一 `round_no`。
+  他人/管理员不能代撤代发。
+- **已发布只能追加更正**：`PUBLISHED` 意见原文（依据/置信说明/结论）**永不改写、
+  不可撤回**；修订只能由原专家本人追加 `t_appraisal_correction`（意见内序号递增），
+  原文与全部更正共同构成该专家完整立场。
+- **冲突进仲裁，不覆盖**：复鉴发布时与已发布初鉴比对——结论一致直接定稿；
+  双方结论码不同且都不是 `INCONCLUSIVE`（暂不定论不构成对立）时，自动开立仲裁单
+  `t_appraisal_arbitration`（单号 `ARB-000001`，固化双方意见 id 与冲突摘要），
+  案件进入 `ARBITRATING`，**初鉴/复鉴同时冻结，不能再提交意见覆盖**。仲裁人可
+  `ADOPT_INITIAL 采初鉴` / `ADOPT_REVIEW 采复鉴`（结论自对应意见带入，对方原文保留）
+  / `ADJUSTED 综合调整`（必须显式给出最终结论码、文本、依据、置信说明）。
+  最终结论只落在案件头与仲裁单上。
+- **权限分层与报告下载审计**：普通馆员 `LIBRARIAN` 只能读 `conclusion_summary`
+  （无专家、依据、置信说明、附件）；鉴定专家 `APPRAISAL_EXPERT`、仲裁人 `ARBITER`
+  可取全量详细报告。每次下载（**含被权限拒绝**）都在独立事务写一条
+  `t_appraisal_report_audit`（操作人/角色/放行 GRANTED 或拒绝 DENIED/原因/IP/时间），
+  并落 `APPRAISAL_REPORT_DL` / `APPRAISAL_REPORT_DENY` 台账——拒绝流水独立事务，
+  不随主业务回滚丢失。
+
+### 修复同一操作并发规则
+
+- **五类操作**（开工 `START` / 阶段登记 `STAGE` / 修复完成 `FINISH` / 验收 `ACCEPT`
+  / 作废 `CANCEL`）统一走并发安全入口 `RepairOperationService`，原有业务规则
+  （会签通过才开工、外借占用、阶段数、验收补偿等）全部保留。
+- **项目行锁串行化**：进入操作先 `UPDATE t_repair_project … WHERE id=?` 取项目行排他锁
+  （锁持有到事务提交，不用 `SELECT … FOR UPDATE`），同一项目的并发请求排队，
+  先提交者生效，后者锁内复查到已变化的状态后被拒绝。
+- **谁生效、谁被拒绝逐条审计**（`t_repair_operation_attempt`）：
+  - 生效的一次与项目状态推进**同一事务原子提交**，记 `EFFECTIVE` 及产出业务行 id；
+  - 落败/状态不允许的一次业务事务**整体回滚**（阶段/台账等业务写入全部撤销），
+    在 `REQUIRES_NEW` 独立事务补写一条 `REJECTED`，含拒绝原因并指向
+    **最终生效尝试 id**，同时落 `REPAIR_OP_REJECT` 台账（摘要写明“最终生效为尝试#N”）。
+    因此“谁生效、谁被拒绝、为什么”都可追溯，且审计不随回滚丢失。
+  - 可重复操作（如阶段登记）并发时每次都生效，行锁保证阶段号 `1..N` 不重不丢；
+    状态跃迁操作（完成/验收等）并发时恰一个 `EFFECTIVE`，其余全部 `REJECTED`。
+- **请求流水号幂等**：`request_no` 全表稀疏唯一。修复侧补传/补录/重试复用同一流水号，
+  锁前快查、锁内二次回读，命中同一次尝试即回放原结果（生效回放业务结果，被拒回放
+  原拒绝原因），绝不二次执行、绝不产生第二条尝试。
+
+### 鉴定与并发接口
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `POST /api/appraisal-cases` | 开立鉴定案件（关联文物，可带修复项目） |
+| `POST /api/appraisal-cases/{id}/opinions` | 提交初鉴/复鉴意见（`publish=true` 直接发布，否则存可撤回草稿） |
+| `POST /api/appraisal-cases/opinions/{opinionId}/publish` | 专家本人发布未发布草稿 |
+| `POST /api/appraisal-cases/opinions/{opinionId}/withdraw` | 专家本人撤回未发布意见（必填原因，留痕不删档） |
+| `POST /api/appraisal-cases/opinions/{opinionId}/corrections` | 已发布意见追加更正（原专家本人，原文不改写） |
+| `POST /api/appraisal-cases/arbitrations/{arbitrationId}/conclude` | 仲裁定稿：采初鉴/采复鉴/综合调整 |
+| `GET /api/appraisal-cases/{id}/detail` | 专家/仲裁全量详情：两轮意见+更正+附件+仲裁单 |
+| `GET /api/appraisal-cases/{id}/summary` | 普通馆员视角：仅结论摘要 |
+| `POST /api/appraisal-cases/{id}/report-download?operatorName=&role=` | 下载详细报告（专家/仲裁放行，馆员拒绝；均写审计） |
+| `GET /api/appraisal-cases/{id}/report-audits` | 报告下载审计流水（放行/拒绝） |
+| `POST /api/repair-projects/{id}/start|finish` | 并发安全开工/完成（body 可选 `requestNo`、`operatorName`） |
+| `POST /api/repair-projects/{id}/stages|accept|cancel` | 并发安全阶段登记/验收/作废（body 可选 `requestNo`） |
+| `GET /api/repair-projects/{id}/operation-attempts?operation=` | 并发尝试审计：谁 EFFECTIVE、谁 REJECTED 及胜出尝试 |
+
+### 测试
+
+`AppraisalOpinionTest`、`RepairOperationConcurrentTest`（各自独立内存库）覆盖：
+草稿非本人不可撤/撤回必填原因/撤回留痕不删档/撤回后不可再发布、已发布不可撤回、
+更正只能本人且追加不改原文；初鉴未发布不能复鉴、复鉴与初鉴一致直接定稿不仲裁、
+真/伪冲突进仲裁且两轮原文都保留、仲裁期间意见冻结、非指定仲裁人不可定稿、
+采初鉴/综合调整（缺结论要素拒绝）、暂不定论不构成冲突；普通馆员摘要无专家/依据/
+附件、详细报告馆员被拒写 DENIED、专家放行写 GRANTED，两条审计都在且台账留痕；
+8 并发阶段登记全部生效阶段号 1..8、8 并发修复完成恰 1 生效 7 拒绝且被拒记录指向
+同一胜出尝试、7 条 `REPAIR_OP_REJECT` 台账均写明最终生效尝试、胜出流水号重放不二次执行、
+8 并发同一流水号开工只形成一条生效尝试。

@@ -407,4 +407,72 @@ public final class MuseumConstants {
     public static final String ACTION_GRADE_COMP_RESOLVE = "GRADE_COMP_RESOLVE";
     public static final String ACTION_BORROW_COMP_OPEN = "BORROW_COMP_OPEN";
     public static final String ACTION_BORROW_COMP_RESOLVE = "BORROW_COMP_RESOLVE";
+
+    // --------------------------------------------------------------------
+    // museum-11 文物鉴定意见 与 修复操作并发审计
+    // --------------------------------------------------------------------
+
+    /** 鉴定案件状态：待初鉴 / 待复鉴 / 仲裁中 / 已定稿 */
+    public static final String APPRAISAL_OPEN = "OPEN";
+    public static final String APPRAISAL_REVIEWING = "REVIEWING";
+    public static final String APPRAISAL_ARBITRATING = "ARBITRATING";
+    public static final String APPRAISAL_CONCLUDED = "CONCLUDED";
+
+    /** 鉴定轮次：初鉴 / 复鉴 */
+    public static final String APPRAISAL_STAGE_INITIAL = "INITIAL";
+    public static final String APPRAISAL_STAGE_REVIEW = "REVIEW";
+    public static final String APPRAISAL_STAGE_ARBITRATION = "ARBITRATION";
+
+    /** 鉴定结论码：真 / 伪 / 部分真 / 暂不定论 */
+    public static final String CONCLUSION_AUTHENTIC = "AUTHENTIC";
+    public static final String CONCLUSION_COUNTERFEIT = "COUNTERFEIT";
+    public static final String CONCLUSION_PARTIAL = "PARTIAL";
+    public static final String CONCLUSION_INCONCLUSIVE = "INCONCLUSIVE";
+
+    /** 意见状态：未发布（可撤回）/ 已发布（只能追加更正）/ 已撤回（留痕） */
+    public static final String OPINION_DRAFT = "DRAFT";
+    public static final String OPINION_PUBLISHED = "PUBLISHED";
+    public static final String OPINION_WITHDRAWN = "WITHDRAWN";
+
+    /** 仲裁决定：采初鉴 / 采复鉴 / 综合调整 */
+    public static final String ARB_ADOPT_INITIAL = "ADOPT_INITIAL";
+    public static final String ARB_ADOPT_REVIEW = "ADOPT_REVIEW";
+    public static final String ARB_ADJUSTED = "ADJUSTED";
+
+    /** 仲裁单状态 */
+    public static final String ARB_OPEN = "OPEN";
+    public static final String ARB_CONCLUDED = "CONCLUDED";
+
+    /** 报告下载审计结果：放行 / 拒绝（拒绝同样留痕） */
+    public static final String REPORT_GRANTED = "GRANTED";
+    public static final String REPORT_DENIED = "DENIED";
+
+    /** 详细报告可见岗位：鉴定专家 / 仲裁人；普通馆员只见结论摘要 */
+    public static final String ROLE_APPRAISAL_EXPERT = "APPRAISAL_EXPERT";
+    public static final String ROLE_ARBITER = "ARBITER";
+    public static final String ROLE_LIBRARIAN = "LIBRARIAN";
+
+    /** 修复并发操作尝试决定：生效 / 被拒绝 */
+    public static final String ATTEMPT_EFFECTIVE = "EFFECTIVE";
+    public static final String ATTEMPT_REJECTED = "REJECTED";
+
+    /** 修复并发操作类型 */
+    public static final String OP_START = "START";
+    public static final String OP_STAGE = "STAGE";
+    public static final String OP_FINISH = "FINISH";
+    public static final String OP_ACCEPT = "ACCEPT";
+    public static final String OP_CANCEL = "CANCEL";
+
+    /** 台账流水动作：鉴定各环节、报告下载、修复并发拒绝 */
+    public static final String ACTION_APPRAISAL_OPEN = "APPRAISAL_OPEN";
+    public static final String ACTION_APPRAISAL_DRAFT = "APPRAISAL_DRAFT";
+    public static final String ACTION_APPRAISAL_PUBLISH = "APPRAISAL_PUBLISH";
+    public static final String ACTION_APPRAISAL_WITHDRAW = "APPRAISAL_WITHDRAW";
+    public static final String ACTION_APPRAISAL_CORRECT = "APPRAISAL_CORRECT";
+    public static final String ACTION_APPRAISAL_ARB_OPEN = "APPRAISAL_ARB_OPEN";
+    public static final String ACTION_APPRAISAL_ARB_CONCLUDE = "APPRAISAL_ARB_CONCLUDE";
+    public static final String ACTION_APPRAISAL_CONCLUDE = "APPRAISAL_CONCLUDE";
+    public static final String ACTION_APPRAISAL_REPORT_DOWNLOAD = "APPRAISAL_REPORT_DL";
+    public static final String ACTION_APPRAISAL_REPORT_DENY = "APPRAISAL_REPORT_DENY";
+    public static final String ACTION_REPAIR_OP_REJECT = "REPAIR_OP_REJECT";
 }

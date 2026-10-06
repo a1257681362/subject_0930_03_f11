@@ -20,4 +20,9 @@ public class AcceptRequest {
      * CONDITIONAL 必填：立即落到文物档案，并开立保护等级补偿（museum-10）。
      */
     private String gradeAfter;
+
+    /**
+     * 客户端请求流水号（museum-11）：并发/重试/补传复用，命中同一次尝试，不重复验收。
+     */
+    private String requestNo;
 }
