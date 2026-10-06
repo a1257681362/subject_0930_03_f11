@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
@@ -40,10 +41,11 @@ public class RepairController {
         return ApiResponse.ok(repairService.createProject(request));
     }
 
-    /** 开工 */
+    /** 开工（operator 可选：并发同一操作时指认谁生效、谁被拒绝） */
     @PostMapping("/{id}/start")
-    public ApiResponse<RepairProject> start(@PathVariable Long id) {
-        return ApiResponse.ok(repairService.startRepair(id));
+    public ApiResponse<RepairProject> start(@PathVariable Long id,
+                                            @RequestParam(required = false) String operator) {
+        return ApiResponse.ok(repairService.startRepair(id, operator == null ? "SYSTEM" : operator));
     }
 
     /** 登记阶段结果（可多次，序号项目内递增） */
@@ -55,8 +57,9 @@ public class RepairController {
 
     /** 修复完成，进入待验收 */
     @PostMapping("/{id}/finish")
-    public ApiResponse<RepairProject> finish(@PathVariable Long id) {
-        return ApiResponse.ok(repairService.finishRepair(id));
+    public ApiResponse<RepairProject> finish(@PathVariable Long id,
+                                             @RequestParam(required = false) String operator) {
+        return ApiResponse.ok(repairService.finishRepair(id, operator == null ? "SYSTEM" : operator));
     }
 
     /** 验收：项目闭环 */
@@ -66,11 +69,13 @@ public class RepairController {
         return ApiResponse.ok(repairService.accept(id, request));
     }
 
-    /** 作废：只改状态 */
+    /** 作废：只改状态（operator 可选，缺省 SYSTEM） */
     @PostMapping("/{id}/cancel")
     public ApiResponse<RepairProject> cancel(@PathVariable Long id,
                                              @Valid @RequestBody CancelRequest request) {
-        return ApiResponse.ok(repairService.cancel(id, request.getReason()));
+        String operator = request.getOperator() == null || request.getOperator().isEmpty()
+                ? "SYSTEM" : request.getOperator();
+        return ApiResponse.ok(repairService.cancel(id, request.getReason(), operator));
     }
 
     /** 项目详情：项目 + 阶段结果 + 验收记录 */

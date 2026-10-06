@@ -610,3 +610,71 @@ mvn test
 CONDITIONAL 必带合法等级、无借阅/已批准待出库 RECALL/已归还 SUPPLEMENT_CONFIRM/
 审批中驳回四种补偿对应、两补偿互持 id、RECALL 阻断出库且先闭环、
 等级补偿不得先于借阅补偿闭环、确认时最终等级再更正；全动作台账留痕。
+
+## 文物鉴定意见（museum-11）
+
+文物鉴定分**初鉴（INITIAL）与复鉴（REVIEW）**两道工序，分别落表保存**鉴定专家、
+鉴定依据、置信说明与附件**，提交后原文不改写。初鉴与复鉴**结论冲突时进入仲裁
+状态**：两条意见原样保留，**绝不取最后一条覆盖前文**，仲裁裁决只落案件结论。
+**未发布意见可由本专家撤回；已发布意见不可撤回、不可改写，只能逐条追加更正。**
+**普通馆员仅能看到结论摘要**（轮次/结论/状态/仲裁结论），鉴定专家与鉴定负责人
+可见全文；**下载详细报告逐次写审计流水**（含被拒绝的尝试）。鉴定与修复链路的
+**同一操作并发发起时只放行第一个**：后到者被拒绝，响应与审计同时说明
+**谁生效、谁被拒绝**。
+
+### 鉴定规则
+
+- **意见主表**（`t_appraisal_opinion`，单号 `AP-000001`）：一件文物同一轮次只允许
+  一条在途（`SUBMITTED`/`PUBLISHED`）意见——`active_key`（文物-轮次）稀疏唯一约束
+  兜底，文物行锁串行化并发提交；复鉴须先有在途初鉴。结论口径：
+  `AUTHENTIC` 真品 / `FAKE` 伪品 / `UNCERTAIN` 存疑。
+- **附件**（`t_appraisal_attachment`）随意见一并固化，只追加不删除，
+  意见撤回后附件仍留档。
+- **冲突仲裁**（`t_appraisal_arbitration`，单号 `AR-000001`）：复鉴提交时与在途
+  初鉴结论不一致即开立仲裁中案件（一件文物同时只有一个，`open_key` 稀疏唯一）。
+  裁决（仅鉴定负责人）落 `final_conclusion` 与裁决说明，**不改写任何一条意见原文**；
+  复鉴意见撤回导致冲突消失时案件自动关闭（`CLOSED`，非裁决）。
+- **撤回**：仅 `SUBMITTED` 且仅提交该意见的本专家可撤回（`WITHDRAWN`，记录保留、
+  槽位释放可再提交）；复鉴在途时初鉴不能撤回；已发布意见不能撤回。
+- **发布与更正**：仅鉴定负责人可发布（`PUBLISHED`）；已发布意见只能追加更正
+  （`t_appraisal_correction`，只追加），原文永不改写。
+- **岗位可见性**：`APPRAISAL_EXPERT`/`APPRAISAL_LEADER` 见全文（意见原文+附件+
+  更正+仲裁）；`CURATOR` 等其他岗位仅见结论摘要，不含专家、依据、置信说明、
+  附件与更正明细；详细报告仅专家/负责人可下载，每次下载（含馆员被拒尝试）
+  写 `t_appraisal_audit`。
+- **审计流水**（`t_appraisal_audit`，只追加）：提交/撤回/发布/更正/仲裁开立/
+  裁决/关闭/报告下载全部留痕；并发或冲突被拒绝写 `APPRAISAL_REJECT`，
+  内容指明先生效的意见编号/专家与本次被拒绝的提交人。
+- **修复同一操作并发**：开工/完成/验收/作废改为**条件更新原子守卫**
+  （`UPDATE ... WHERE status=前置状态`），只放行第一个到达的操作；
+  后到者（无论是原子守卫拦截还是状态前置校验拦截）都写 `t_relic_ledger`
+  的 `REPAIR_OP_REJECT` 台账（独立事务提交，业务回滚不丢审计），
+  响应说明先生效的台账/当前状态与本次被拒绝的操作人。
+
+### 鉴定接口
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `POST /api/appraisals` | 提交初鉴/复鉴意见（专家/结论/依据/置信说明/附件）；同轮次已有在途意见时拒绝并留审计 |
+| `POST /api/appraisals/{id}/withdraw` | 撤回未发布意见（仅本专家）；复鉴撤回时仲裁案件自动关闭 |
+| `POST /api/appraisals/{id}/publish?operator=&role=` | 发布意见（仅 `APPRAISAL_LEADER`）；发布后只能追加更正 |
+| `POST /api/appraisals/{id}/corrections` | 已发布意见追加更正（只追加，原文不改写） |
+| `POST /api/appraisals/arbitrations/{caseId}/resolve?role=` | 仲裁裁决（仅负责人）；裁决只落案件结论，两条意见原文保留 |
+| `GET /api/appraisals/arbitrations?status=` | 仲裁案件列表（可按状态过滤） |
+| `GET /api/appraisals/relics/{relicId}?role=` | 按岗位查看：专家/负责人见全文，普通馆员仅结论摘要 |
+| `GET /api/appraisals/relics/{relicId}/report?role=&operator=` | 下载详细报告（仅专家/负责人），每次下载写审计流水 |
+| `GET /api/appraisals/relics/{relicId}/audit` | 鉴定审计流水（含并发/冲突拒绝记录） |
+| `POST /api/repair-projects/{id}/start|finish?operator=` | 开工/完成（带操作人）：并发同一操作只生效一个，其余拒绝并留台账 |
+| `POST /api/repair-projects/{id}/cancel` | 作废（可带 `operator`）：并发只生效一个，拒绝写 `REPAIR_OP_REJECT` |
+
+### 测试
+
+`AppraisalFlowTest`、`AppraisalConcurrentTest`、`RepairOperationConcurrentTest`
+（各自独立内存库）覆盖：初鉴/复鉴分别保存专家/依据/置信说明/附件；
+同轮次重复提交拒绝并指认先生效意见；复鉴结论一致不进仲裁、冲突即进仲裁且
+两条意见原样保留；非本专家撤回拒绝、本专家撤回释放槽位、复鉴在途时初鉴禁撤回、
+复鉴撤回仲裁自动关闭；仅负责人可发布、已发布禁撤回、更正逐条追加且原文不改写；
+普通馆员仅见结论摘要（无专家/依据/附件）、专家见全文；馆员下载报告被拒留审计、
+专家下载留审计；仲裁裁决只落案件结论不改写意见；8 并发提交/发布/裁决同一对象
+均只生效一个、其余拒绝且审计齐全；8 并发开工/作废同一修复项目只生效一个，
+`REPAIR_OP_REJECT` 台账说明谁生效、谁被拒绝。

@@ -407,4 +407,45 @@ public final class MuseumConstants {
     public static final String ACTION_GRADE_COMP_RESOLVE = "GRADE_COMP_RESOLVE";
     public static final String ACTION_BORROW_COMP_OPEN = "BORROW_COMP_OPEN";
     public static final String ACTION_BORROW_COMP_RESOLVE = "BORROW_COMP_RESOLVE";
+
+    // --------------------------------------------------------------------
+    // museum-11 文物鉴定意见
+    // --------------------------------------------------------------------
+
+    /** 鉴定轮次：初鉴 / 复鉴（复鉴须先有在途初鉴） */
+    public static final String ROUND_INITIAL = "INITIAL";
+    public static final String ROUND_REVIEW = "REVIEW";
+
+    /** 鉴定结论：真品 / 伪品 / 存疑 */
+    public static final String CONC_AUTHENTIC = "AUTHENTIC";
+    public static final String CONC_FAKE = "FAKE";
+    public static final String CONC_UNCERTAIN = "UNCERTAIN";
+
+    /** 意见状态：已提交未发布 / 已发布 / 已撤回（撤回不删记录） */
+    public static final String OPINION_SUBMITTED = "SUBMITTED";
+    public static final String OPINION_PUBLISHED = "PUBLISHED";
+    public static final String OPINION_WITHDRAWN = "WITHDRAWN";
+
+    /** 仲裁状态：仲裁中 / 已裁决 / 已关闭（复鉴撤回、冲突消失时自动关闭） */
+    public static final String ARB_ARBITRATING = "ARBITRATING";
+    public static final String ARB_RESOLVED = "RESOLVED";
+    public static final String ARB_CLOSED = "CLOSED";
+
+    /** 鉴定岗位：鉴定专家 / 鉴定负责人（可见全文与下载报告）；普通馆员复用 CURATOR 仅见结论摘要 */
+    public static final String ROLE_APPRAISAL_EXPERT = "APPRAISAL_EXPERT";
+    public static final String ROLE_APPRAISAL_LEADER = "APPRAISAL_LEADER";
+
+    /** 鉴定审计动作 */
+    public static final String ACTION_APPRAISAL_SUBMIT = "APPRAISAL_SUBMIT";
+    public static final String ACTION_APPRAISAL_WITHDRAW = "APPRAISAL_WITHDRAW";
+    public static final String ACTION_APPRAISAL_PUBLISH = "APPRAISAL_PUBLISH";
+    public static final String ACTION_APPRAISAL_CORRECT = "APPRAISAL_CORRECT";
+    public static final String ACTION_ARBITRATION_OPEN = "ARBITRATION_OPEN";
+    public static final String ACTION_ARBITRATION_RESOLVE = "ARBITRATION_RESOLVE";
+    public static final String ACTION_ARBITRATION_CLOSE = "ARBITRATION_CLOSE";
+    public static final String ACTION_APPRAISAL_DOWNLOAD = "APPRAISAL_DOWNLOAD";
+    public static final String ACTION_APPRAISAL_REJECT = "APPRAISAL_REJECT";
+
+    /** 修复同一操作并发被拒绝（台账动作：说明谁生效、谁被拒绝） */
+    public static final String ACTION_REPAIR_OP_REJECT = "REPAIR_OP_REJECT";
 }

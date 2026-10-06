@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.evops.dto.AcceptRequest;
 import com.evops.dto.ProjectCreateRequest;
 import com.evops.dto.StageRequest;
+import com.evops.entity.LedgerEntry;
 import com.evops.entity.Relic;
 import com.evops.entity.RelicLoan;
 import com.evops.entity.RepairAcceptance;
@@ -92,9 +93,19 @@ public class RepairService {
     /** 开工：PLANNED -> REPAIRING；文物借出未还时不允许开工；方案会签通过才允许生成施工任务 */
     @Transactional
     public RepairProject startRepair(Long projectId) {
+        return startRepair(projectId, "SYSTEM");
+    }
+
+    /**
+     * 开工（带操作人）。同一操作并发发起时，条件更新只放行第一个，
+     * 后到者被拒绝：台账说明谁生效、谁被拒绝。
+     */
+    @Transactional
+    public RepairProject startRepair(Long projectId, String operator) {
         RepairProject project = requireProject(projectId);
         if (!PROJECT_PLANNED.equals(project.getStatus())) {
-            throw new IllegalArgumentException("项目不是已立项状态，不能开工: " + project.getProjectNo());
+            throw rejectConflict(project, ACTION_REPAIR_START, "开工", operator,
+                    "项目不是已立项状态，不能开工: " + project.getProjectNo());
         }
         Long openLoans = loanMapper.selectCount(new LambdaQueryWrapper<RelicLoan>()
                 .eq(RelicLoan::getRelicId, project.getRelicId())
@@ -112,15 +123,19 @@ public class RepairService {
             throw new IllegalArgumentException("方案会签未完成，不能生成施工任务（开工）: "
                     + project.getProjectNo());
         }
+        // 原子守卫：并发开工只有第一个生效
+        if (projectMapper.startIfPlanned(projectId, LocalDate.now()) == 0) {
+            throw rejectConflict(project, ACTION_REPAIR_START, "开工", operator, null);
+        }
         project.setStatus(PROJECT_REPAIRING);
         if (project.getStartDate() == null) {
             project.setStartDate(LocalDate.now());
         }
-        projectMapper.updateById(project);
 
         ledgerService.append(project.getRelicId(), projectId, null,
                 ACTION_REPAIR_START, project.getProjectNo(),
-                "修复项目开工，委托人：" + project.getClient(), LocalDateTime.now());
+                "修复项目开工，委托人：" + project.getClient() + "，操作人：" + operator,
+                LocalDateTime.now());
         return project;
     }
 
@@ -156,9 +171,16 @@ public class RepairService {
     /** 修复完成：REPAIRING -> REPAIRED，等待验收 */
     @Transactional
     public RepairProject finishRepair(Long projectId) {
+        return finishRepair(projectId, "SYSTEM");
+    }
+
+    /** 修复完成（带操作人）：并发完成只有第一个生效，后到者拒绝并留台账 */
+    @Transactional
+    public RepairProject finishRepair(Long projectId, String operator) {
         RepairProject project = requireProject(projectId);
         if (!PROJECT_REPAIRING.equals(project.getStatus())) {
-            throw new IllegalArgumentException("项目不在修复中，不能完成: " + project.getProjectNo());
+            throw rejectConflict(project, ACTION_REPAIR_FINISH, "修复完成", operator,
+                    "项目不在修复中，不能完成: " + project.getProjectNo());
         }
         Long stageCount = stageMapper.selectCount(new LambdaQueryWrapper<RepairStage>()
                 .eq(RepairStage::getProjectId, projectId));
@@ -166,13 +188,15 @@ public class RepairService {
             throw new IllegalArgumentException("尚未登记任何阶段结果，不能完成修复");
         }
         LocalDateTime now = LocalDateTime.now();
+        if (projectMapper.finishIfRepairing(projectId, LocalDate.now()) == 0) {
+            throw rejectConflict(project, ACTION_REPAIR_FINISH, "修复完成", operator, null);
+        }
         project.setStatus(PROJECT_REPAIRED);
         project.setFinishDate(LocalDate.now());
-        projectMapper.updateById(project);
 
         ledgerService.append(project.getRelicId(), projectId, null,
                 ACTION_REPAIR_FINISH, project.getProjectNo(),
-                "修复完成，共 " + stageCount + " 个阶段，待验收", now);
+                "修复完成，共 " + stageCount + " 个阶段，待验收，操作人：" + operator, now);
         return project;
     }
 
@@ -181,7 +205,8 @@ public class RepairService {
     public RepairAcceptance accept(Long projectId, AcceptRequest req) {
         RepairProject project = requireProject(projectId);
         if (!PROJECT_REPAIRED.equals(project.getStatus())) {
-            throw new IllegalArgumentException("项目未处于待验收状态，不能验收: " + project.getProjectNo());
+            throw rejectConflict(project, ACTION_ACCEPT, "验收", req.getAcceptedBy(),
+                    "项目未处于待验收状态，不能验收: " + project.getProjectNo());
         }
         String result = (req.getResult() == null || req.getResult().isEmpty())
                 ? ACCEPT_PASS : req.getResult();
@@ -196,6 +221,10 @@ public class RepairService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        // 原子守卫先行：并发验收只有第一个生效，避免重复验收记录
+        if (projectMapper.acceptIfRepaired(projectId) == 0) {
+            throw rejectConflict(project, ACTION_ACCEPT, "验收", req.getAcceptedBy(), null);
+        }
         RepairAcceptance acceptance = new RepairAcceptance();
         acceptance.setProjectId(projectId);
         acceptance.setAcceptedBy(req.getAcceptedBy());
@@ -205,7 +234,6 @@ public class RepairService {
         acceptanceMapper.insert(acceptance);
 
         project.setStatus(PROJECT_ACCEPTED);
-        projectMapper.updateById(project);
 
         ledgerService.append(project.getRelicId(), projectId, null,
                 ACTION_ACCEPT, project.getProjectNo(),
@@ -224,21 +252,55 @@ public class RepairService {
     /** 作废：仅 PLANNED / REPAIRING 可作废，记录保留 */
     @Transactional
     public RepairProject cancel(Long projectId, String reason) {
+        return cancel(projectId, reason, "SYSTEM");
+    }
+
+    /** 作废（带操作人）：并发作废只有第一个生效，后到者拒绝并留台账 */
+    @Transactional
+    public RepairProject cancel(Long projectId, String reason, String operator) {
         RepairProject project = requireProject(projectId);
         if (!PROJECT_PLANNED.equals(project.getStatus())
                 && !PROJECT_REPAIRING.equals(project.getStatus())) {
-            throw new IllegalArgumentException("当前状态不允许作废: " + project.getStatus());
+            throw rejectConflict(project, ACTION_CANCEL, "作废", operator,
+                    "当前状态不允许作废: " + project.getStatus());
         }
         LocalDateTime now = LocalDateTime.now();
+        if (projectMapper.cancelIfOpen(projectId, reason, now) == 0) {
+            throw rejectConflict(project, ACTION_CANCEL, "作废", operator, null);
+        }
         project.setStatus(PROJECT_CANCELLED);
         project.setCancelReason(reason);
         project.setCancelledAt(now);
-        projectMapper.updateById(project);
 
         ledgerService.append(project.getRelicId(), projectId, null,
                 ACTION_CANCEL, project.getProjectNo(),
-                "修复项目作废，原因：" + reason, now);
+                "修复项目作废，原因：" + reason + "，操作人：" + operator, now);
         return project;
+    }
+
+    /**
+     * 状态冲突拒绝（并发同一操作或重复操作）：项目行已被先前操作改变。
+     * 台账独立事务留痕——说明谁生效（最近一条对应动作台账/当前状态）、
+     * 谁被拒绝（本次操作人）；返回的异常保留旧版提示前缀，附拒绝说明。
+     */
+    private IllegalArgumentException rejectConflict(RepairProject project, String action,
+                                                    String actionLabel, String operator,
+                                                    String legacyMessage) {
+        RepairProject current = projectMapper.selectById(project.getId());
+        LedgerEntry winning = ledgerService.findLatestByProjectAction(project.getId(), action);
+        String winnerText = winning == null
+                ? "当前状态 " + current.getStatus()
+                : "台账#" + winning.getId() + "（" + winning.getSummary() + "，时间 "
+                        + winning.getOccurredAt() + "）";
+        ledgerService.appendIsolated(current.getRelicId(), current.getId(), null,
+                ACTION_REPAIR_OP_REJECT, current.getProjectNo(),
+                actionLabel + "被拒绝：并发/重复操作已先行生效，先生效的是" + winnerText
+                        + "；本次操作人 " + operator + " 未生效", LocalDateTime.now());
+        String detail = "本次" + actionLabel + "未生效：并发/重复操作已先行生效（" + winnerText
+                + "），操作人 " + operator + " 被拒绝并已留台账审计";
+        return new IllegalArgumentException(legacyMessage == null
+                ? detail
+                : legacyMessage + "；" + detail);
     }
 
     public RepairProject requireProject(Long projectId) {
